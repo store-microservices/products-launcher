@@ -1,12 +1,11 @@
 version: '3'
 
-
-
 services:
   nats-server:
     image: nats:latest
-    ports: 
+    ports:
       - "8222:8222"
+      - "4222:4222"
 
   client-geteway:
     build: ./client-gateway
@@ -17,44 +16,121 @@ services:
     command: npm run start:dev
     environment:
       - PORT=3000
-      - NATS_SERVERS=nats://nats-server:4222
-    
-  products-ms:
-    build: ./products-microservice
-    ports:
-        - "3001:3001"
-    volumes:
-        - ./products-microservice/src:/usr/src/app/src
-    command: npm run docker:start
-    environment:
-        - PORT=3000
-        - NATS_SERVERS=nats://nats-server:4222
-        - DATABASE_URL=file:./dev.db
+      - NATS_SERVERS=${NATS_SERVER_URL}
 
-  orders-ms:
-    build: ./orders-microservice
-    ports:
-      - "3002:3002"
-    volumes:
-      - ./orders-microservice/src:/usr/src/app/src
-    command: npm run docker:start
-    environment:
-      - PORT=3002
-      - NATS_SERVERS=nats://nats-server:4222
-      - DATABASE_URL=postgresql://orders:password@orders-db:5432/orders?schema=public
-    depends_on:
-      - orders-db
+  # products-ms:
+  #   build: ./products-microservice
+  #   ports:
+  #       - "3001:3001"
+  #   volumes:
+  #       - ./products-microservice/src:/usr/src/app/src
+  #   command: npm run docker:start
+  #   environment:
+  #       - PORT=3000
+  #       - NATS_SERVERS=${NATS_SERVER_URL}
+  #       - DATABASE_URL=file:./dev.db
 
-  orders-db:
-    container_name: orders-db
-    image: postgres:16.2
+  # orders-db:
+  #   container_name: orders-db
+  #   image: postgres:16.2
+  #   restart: always
+  #   ports:
+  #     - "5432:5432"
+  #   environment:
+  #     POSTGRES_USER: orders
+  #     POSTGRES_PASSWORD: password
+  #     POSTGRES_DB: orders
+  #   volumes:
+  #     - orders-db-data:/var/lib/postgresql/data
+
+  # orders-ms:
+  #   build: ./orders-microservice
+  #   ports:
+  #     - "3002:3002"
+  #   volumes:
+  #     - ./orders-microservice/src:/usr/src/app/src
+  #   command: ["./wait-for", "orders-db:5432", "--", "npm", "run", "docker:start"]
+  #   environment:
+  #     - PORT=3002
+  #     - NATS_SERVERS=${NATS_SERVER_URL}
+  #     - DATABASE_URL=postgresql://orders:password@orders-db:5432/orders?schema=public
+  #   depends_on:
+  #     - orders-db
+
+  # auth-db:
+  #   container_name: auth-db
+  #   image: mysql
+  #   restart: always
+  #   ports:
+  #     - "3306:3306"
+  #   environment:
+  #     MYSQL_ROOT_PASSWORD: root
+  #     MYSQL_DATABASE: auth
+  #   volumes:
+  #     - ./initdb.sql:/docker-entrypoint-initdb.d/init.sql
+
+
+  # auth-ms:
+  #   build: ./auth-microservice
+  #   ports:
+  #     - "3003:3003"
+  #   volumes:
+  #     - ./auth-microservice/src:/usr/src/app/src
+  #   command: ["./wait-for", "auth-db:3306", "--", "npm", "run", "docker:start"]
+
+  #   environment:
+  #     - PORT=3003
+  #     - NATS_SERVERS=${NATS_SERVER_URL}
+  #     - DATABASE_URL=mysql://root:root@auth-db:3306/users
+  #     - JWT_SECRET=secret
+  #     - JWT_EXPIRES_IN="2h"
+  #   depends_on:
+  #     - auth-db
+
+  search-db:
+    container_name: search-db
+    image: mysql
     restart: always
     ports:
-      - "5432:5432"
+      - "3307:3307"
     environment:
-      POSTGRES_USER: orders
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: orders
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: ProductsDb
     volumes:
-      - ./orders-db:/var/lib/postgresql/data
-    
+      - search-db-data:/var/lib/mysql
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.9.0
+    environment:
+      - discovery.type=single-node
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    volumes:
+      - es-data:/usr/share/elasticsearch/data
+
+  search-microservice:
+    image: search-microservice:latest
+    build:
+      context: './search-microservice/SearchMicroservice.API'
+      dockerfile: Dockerfile
+    ports:
+      - "5000:5000"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ConnectionStrings__MySQL=Server=search-db;Database=ProductsDb;User=root;Password=root;
+      - ElasticSearch__Url=http://elasticsearch:9200
+      - NATS__Url=nats://nats:4222
+    depends_on:
+      - search-db
+      - nats-server
+      - elasticsearch
+
+volumes:
+  orders-db-data:
+  auth-db-data:
+  search-db-data:
+  es-data:
+
+
